@@ -89,7 +89,7 @@ func genCert() {
 func parseConn(conn *net.TCPConn) {
 	writer := io.Writer(conn)
 
-	writer.Write([]byte("220 Staal XXE-FTP\r\n"))
+	writer.Write([]byte("220 FTP\r\n"))
 	var olog *log.Logger
 
 	if fileLogger != nil {
