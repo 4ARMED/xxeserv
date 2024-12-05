@@ -38,9 +38,9 @@ func genCert() {
 	ca := &x509.Certificate{
 		SerialNumber: s,
 		Subject: pkix.Name{
-			Country:      []string{"ZA"},
-			Organization: []string{"Staaldraad"},
-			CommonName:   "*.draad.io",
+			Country:      []string{"GB"},
+			Organization: []string{"4ARMED"},
+			CommonName:   "*.4armed.io",
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
@@ -211,7 +211,7 @@ func startFTP() {
 		logger.Fatal("[x] - Failed to start connection\n", err)
 	}
 
-	logger.Println("[*] GO XXE FTP Server - Port: ", FTPPORT)
+	logger.Println("[*] FTP Server - Port: ", FTPPORT)
 
 	for {
 		clientConn, err = ls.AcceptTCP()
