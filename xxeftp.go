@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	mathrand "math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +26,8 @@ var hostDir string = "./"
 var HTTPPORT int
 var HTTPSPORT int
 var FTPPORT int
+var passivePortStart int = 49152
+var passivePortEnd int = 65534
 
 func genCert() {
 	if _, err := os.Stat(fmt.Sprintf("%s/cert.pem", hostDir)); err == nil {
@@ -86,10 +89,12 @@ func genCert() {
 	fmt.Println("[*] Certificate files generated")
 }
 
-func parseConn(conn *net.TCPConn) {
+func parseConn(conn *net.TCPConn, passive bool) {
 	writer := io.Writer(conn)
 
-	writer.Write([]byte("220 FTP\r\n"))
+	if !passive {
+		writer.Write([]byte("220 FTP\r\n"))
+	}
 	var olog *log.Logger
 
 	if fileLogger != nil {
@@ -99,7 +104,7 @@ func parseConn(conn *net.TCPConn) {
 	}
 
 	buf := &bytes.Buffer{}
-	reserved := []string{"TYPE", "EPSV", "EPRT"}
+	reserved := []string{"EPRT"}
 	for {
 		data := make([]byte, 2048)
 		n, err := conn.Read(data)
@@ -127,6 +132,36 @@ func parseConn(conn *net.TCPConn) {
 				writer.Write([]byte("451 Nope\r\n"))
 				writer.Write([]byte("221 Goodbye.\r\n"))
 				break
+			} else if cmd == "PASV" {
+				olog.Printf("Entering Passive Mode")
+
+				// port := getPassivePort()
+				// startFTP(port, true)
+
+				port := FTPPORT
+
+				p1 := port / 256
+				p2 := port - (p1 * 256)
+				ip := strings.Split(conn.LocalAddr().String(), ":")[0]
+				quads := strings.Split(ip, ".")
+				reply := fmt.Sprintf("227 Entering Passive Mode (%s,%s,%s,%s,%d,%d)\r\n", quads[0], quads[1], quads[2], quads[3], p1, p2)
+				writer.Write([]byte(reply))
+			} else if cmd == "EPSV" {
+				olog.Printf("Entering Extended Passive Mode")
+
+				port := FTPPORT
+
+				// p1 := port / 256
+				// p2 := port - (p1 * 256)
+				// ip := strings.Split(conn.LocalAddr().String(), ":")[0]
+				// quads := strings.Split(ip, ".")
+				reply := fmt.Sprintf("229 Entering Extended Passive Mode (|||%d|||)\r\n", port)
+				writer.Write([]byte(reply))
+			} else if cmd == "STOR" {
+				olog.Printf("%s", buf.String())
+				writer.Write([]byte("150 Using transfer connection\r\n"))
+			} else if cmd == "TYPE" {
+				writer.Write([]byte("200 Type set to I\r\n"))
 			} else {
 				if string(buf.Bytes()[:3]) == "CWD" {
 					writer.Write([]byte("250 Directory successfully changed.\r\n"))
@@ -155,9 +190,9 @@ func contains(s []string, e string) bool {
 	return false
 }
 
-func handleConnection(incomming <-chan *net.TCPConn, outgoing chan<- *net.TCPConn) {
+func handleConnection(incomming <-chan *net.TCPConn, outgoing chan<- *net.TCPConn, passive bool) {
 	for conn := range incomming {
-		parseConn(conn)
+		parseConn(conn, passive)
 		outgoing <- conn
 	}
 }
@@ -194,24 +229,35 @@ func serveWeb(dir string) {
 	go http.ListenAndServeTLS(fmt.Sprintf(":%d", HTTPSPORT), "cert.pem", "key.pem", nil)
 }
 
-func startFTP() {
+// func acceptConnections(ls *net.TCPListener, waiting chan<- *net.TCPConn) {
+// 	for {
+// 		conn, err := ls.AcceptTCP()
+// 		if err != nil {
+// 			logger.Fatal("[x] - Failed to accept connection\n", err)
+// 		}
+// 		logger.Printf("[*] Connection Accepted from [%s]\n", conn.RemoteAddr().String())
+// 		waiting <- conn
+// 	}
+// }
+
+func startFTP(port int, passive bool) func() error {
 	waiting, complete := make(chan *net.TCPConn), make(chan *net.TCPConn)
 	var err error
 
 	for i := 0; i < 1; i++ {
-		go handleConnection(waiting, complete)
+		go handleConnection(waiting, complete, passive)
 	}
 	go closeConnection(complete)
 
 	var clientConn *net.TCPConn
 
-	addr, _ := net.ResolveTCPAddr("tcp", fmt.Sprint(":", FTPPORT))
+	addr, _ := net.ResolveTCPAddr("tcp", fmt.Sprint(":", port))
 	ls, err := net.ListenTCP("tcp", addr)
 	if err != nil {
 		logger.Fatal("[x] - Failed to start connection\n", err)
 	}
 
-	logger.Println("[*] FTP Server - Port: ", FTPPORT)
+	logger.Println("[*] FTP Server - Port: ", port)
 
 	for {
 		clientConn, err = ls.AcceptTCP()
@@ -221,6 +267,24 @@ func startFTP() {
 		logger.Printf("[*] Connection Accepted from [%s]\n", clientConn.RemoteAddr().String())
 		waiting <- clientConn
 	}
+
+	// acceptConnections(ls, waiting)
+
+	// return func() error {
+	// 	if clientConn != nil {
+	// 		clientConn.Close()
+	// 	}
+	// 	return ls.Close()
+	// }
+}
+
+func getPassivePort() int {
+	var port int
+	for i := passivePortStart; i < passivePortEnd; i++ {
+		port = passivePortStart + mathrand.Intn(passivePortEnd-passivePortStart)
+	}
+
+	return port
 }
 
 func startUno(port int) {
@@ -357,5 +421,5 @@ func main() {
 	if *webEnabledPtr {
 		serveWeb(*webFolderPtr)
 	}
-	startFTP()
+	startFTP(FTPPORT, false)
 }
